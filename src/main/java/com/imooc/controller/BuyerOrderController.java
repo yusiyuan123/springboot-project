@@ -37,30 +37,20 @@ public class BuyerOrderController {
     @Autowired
     private BuyerService buyerService;
 
-
-    //创建订单
     @PostMapping("/create")
-    public ResultVO<Map<String,String>> create(@Valid OrderForm orderForm ,
-                                               BindingResult bindingResult){
-        if(bindingResult.hasErrors()){
-            log.error("【创建订单】参数不正确，orderForm={}",orderForm);
-            throw new SellException(ResultEnum.PARAM_ERROR.getCode(),
-                    bindingResult.getFieldError().getDefaultMessage());
+    public ResultVO<Map<String,String>> create(@Valid OrderForm orderForm,
+                                               BindingResult bindingResult,
+                                               @RequestHeader("token") String token) {
+        // 验证token有效性
+        if (!tokenService.validateToken(token)) {
+            throw new SellException(ResultEnum.REPEAT_SUBMIT);
         }
-        OrderDTO orderDTO= OrderForm2OrderDTOConverter.convert(orderForm);
-        if(CollectionUtils.isEmpty(orderDTO.getOrderDetailList())){
-            log.error("【创建订单】购物车不能为空");
-            throw new SellException(ResultEnum.CART_EMPTY);
-        }
-        OrderDTO createResult=orderService.create(orderDTO);
-
-        Map<String,String> map=new HashMap<>();
-        map.put("orderId",createResult.getOrderId());
-
-        return ResultVOUtil.success(map);
-
+        
+        // 业务逻辑...
+        
+        // 销毁token
+        tokenService.invalidateToken(token);
     }
-
     //订单列表
     @GetMapping("/list")
     public ResultVO<List<OrderDTO>> list(@RequestParam("openid") String openid,
