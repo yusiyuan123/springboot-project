@@ -37,27 +37,38 @@ public class BuyerOrderController {
     @Autowired
     private BuyerService buyerService;
 
-    //创建订单
+
     @PostMapping("/create")
-    public ResultVO<Map<String,String>> create(@Valid OrderForm orderForm ,
-                                               BindingResult bindingResult){
-        if(bindingResult.hasErrors()){
-            log.error("【创建订单】参数不正确，orderForm={}",orderForm);
-            throw new SellException(ResultEnum.PARAM_ERROR.getCode(),
-                    bindingResult.getFieldError().getDefaultMessage());
+    public ResultVO create(@Valid OrderForm orderForm, 
+                          @RequestHeader("Idempotency-Key") String idempotencyKey) {
+        // 1. 校验幂等键
+        if(StringUtils.isEmpty(idempotencyKey)) {
+            throw new SellException(ResultEnum.IDEMPOTENCY_KEY_MISSING);
         }
-        OrderDTO orderDTO= OrderForm2OrderDTOConverter.convert(orderForm);
-        if(CollectionUtils.isEmpty(orderDTO.getOrderDetailList())){
-            log.error("【创建订单】购物车不能为空");
-            throw new SellException(ResultEnum.CART_EMPTY);
+        
+        // 2. Redis检查是否已处理
+        String key = "order:idempotent:" + orderForm.getBuyerOpenid() + ":" + idempotencyKey;
+        Boolean exists = redisTemplate.hasKey(key);
+        if(exists) {
+            // 返回之前的结果或错误
+            return ResultVOUtil.error(ResultEnum.REPEAT_SUBMIT);
         }
-        OrderDTO createResult=orderService.create(orderDTO);
-
-        Map<String,String> map=new HashMap<>();
-        map.put("orderId",createResult.getOrderId());
-
-        return ResultVOUtil.success(map);
-
+        
+        // 3. 设置短期锁（5分钟TTL）
+        redisTemplate.opsForValue().set(key, "processing", 5, TimeUnit.MINUTES);
+        
+        try {
+            // 4. 执行正常业务逻辑
+            OrderDTO orderDTO = orderService.create(converter.convert(orderForm));
+            
+            // 5. 存储成功结果
+            redisTemplate.opsForValue().set(key, JSONObject.toJSONString(orderDTO), 30, TimeUnit.MINUTES);
+            return ResultVOUtil.success(orderDTO);
+        } catch(Exception e) {
+            // 6. 异常情况删除key，允许重试
+            redisTemplate.delete(key);
+            throw e;
+        }
     }
 
     //订单列表
